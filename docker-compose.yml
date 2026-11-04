@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database Service
+  db:
+    image: postgres:16-alpine
+    container_name: finflow-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-finflow_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-finflow_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - finflow-network
+
+  # FastAPI Application Container
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: finflow-processor-app
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/finflow_db}
+      - APP_NAME=finflow-processor
+      - APP_ENV=development
+      - DEBUG=True
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - finflow-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  finflow-network:
+    driver: bridge
