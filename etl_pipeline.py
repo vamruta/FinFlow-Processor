@@ -40,6 +40,58 @@ def is_empty_or_null(val) -> bool:
     return s == "" or s.lower() == "nan"
 
 
+def validate_transaction_row(
+    row: dict,
+    seen_batch_ids: set = None,
+    existing_db_ids: set = None,
+) -> tuple:
+    """
+    Validate a single transaction dictionary against business and data rules.
+    Returns:
+        tuple: (is_valid: bool, error_reason: str or None, amount: float or None, timestamp: datetime or None)
+    """
+    raw_tx_id = row.get("transaction_id")
+    raw_acc_num = row.get("account_number")
+    raw_amount = row.get("amount")
+    raw_merchant = row.get("merchant")
+    raw_timestamp = row.get("timestamp")
+
+    # 1. Mandatory field checks
+    if is_empty_or_null(raw_tx_id):
+        return False, "Missing or null mandatory field: transaction_id", None, None
+    if is_empty_or_null(raw_acc_num):
+        return False, "Missing or null mandatory field: account_number", None, None
+    if is_empty_or_null(raw_timestamp):
+        return False, "Missing or null mandatory field: timestamp", None, None
+    if is_empty_or_null(raw_merchant):
+        return False, "Missing or null mandatory field: merchant", None, None
+
+    # 2. Amount validity check (must be numeric and strictly > 0)
+    if is_empty_or_null(raw_amount):
+        return False, "Missing or null mandatory field: amount", None, None
+    try:
+        amount_val = float(raw_amount)
+        if amount_val <= 0:
+            return False, f"Invalid amount ({amount_val}): must be greater than 0", None, None
+    except (ValueError, TypeError):
+        return False, f"Malformed amount value: {raw_amount}", None, None
+
+    # 3. Timestamp format check
+    try:
+        parsed_timestamp = datetime.fromisoformat(str(raw_timestamp).strip())
+    except (ValueError, TypeError):
+        return False, f"Invalid timestamp format: {raw_timestamp}", None, None
+
+    # 4. Duplicate ID check
+    tx_id_str = str(raw_tx_id).strip()
+    if seen_batch_ids is not None and tx_id_str in seen_batch_ids:
+        return False, f"Duplicate transaction_id '{tx_id_str}' found in current batch", None, None
+    if existing_db_ids is not None and tx_id_str in existing_db_ids:
+        return False, f"Duplicate transaction_id '{tx_id_str}' already exists in PostgreSQL database", None, None
+
+    return True, None, amount_val, parsed_timestamp
+
+
 def run_etl(csv_path: str = CSV_FILE) -> dict:
     print(f"[INFO] Starting ETL Pipeline, extracting from '{csv_path}'...")
 
@@ -97,55 +149,14 @@ def run_etl(csv_path: str = CSV_FILE) -> dict:
             row_dict = row.to_dict()
             raw_payload_str = json.dumps(row_dict, default=str)
 
-            raw_tx_id = row.get("transaction_id")
-            raw_acc_num = row.get("account_number")
-            raw_amount = row.get("amount")
-            raw_currency = row.get("currency")
-            raw_merchant = row.get("merchant")
-            raw_timestamp = row.get("timestamp")
-
-            error_reason = None
-            amount_val = None
-            parsed_timestamp = None
-
-            # 1. Check mandatory fields (transaction_id, account_number, timestamp)
-            if is_empty_or_null(raw_tx_id):
-                error_reason = "Missing or null mandatory field: transaction_id"
-            elif is_empty_or_null(raw_acc_num):
-                error_reason = "Missing or null mandatory field: account_number"
-            elif is_empty_or_null(raw_timestamp):
-                error_reason = "Missing or null mandatory field: timestamp"
-            elif is_empty_or_null(raw_merchant):
-                error_reason = "Missing or null mandatory field: merchant"
-
-            # 2. Check amount validity (must be numeric and > 0)
-            elif is_empty_or_null(raw_amount):
-                error_reason = "Missing or null mandatory field: amount"
-            else:
-                try:
-                    amount_val = float(raw_amount)
-                    if amount_val <= 0:
-                        error_reason = f"Invalid amount ({amount_val}): must be greater than 0"
-                except (ValueError, TypeError):
-                    error_reason = f"Malformed amount value: {raw_amount}"
-
-            # 3. Check timestamp validity
-            if not error_reason:
-                try:
-                    parsed_timestamp = datetime.fromisoformat(str(raw_timestamp).strip())
-                except (ValueError, TypeError):
-                    error_reason = f"Invalid timestamp format: {raw_timestamp}"
-
-            # 4. Check for duplicate transaction_id
-            if not error_reason:
-                tx_id_str = str(raw_tx_id).strip()
-                if tx_id_str in seen_batch_ids:
-                    error_reason = f"Duplicate transaction_id '{tx_id_str}' found in current batch"
-                elif tx_id_str in existing_db_ids:
-                    error_reason = f"Duplicate transaction_id '{tx_id_str}' already exists in PostgreSQL database"
+            is_valid, error_reason, amount_val, parsed_timestamp = validate_transaction_row(
+                row=row_dict,
+                seen_batch_ids=seen_batch_ids,
+                existing_db_ids=existing_db_ids,
+            )
 
             # --- Phase 3: Load into PostgreSQL ---
-            if error_reason:
+            if not is_valid:
                 total_failed += 1
                 error_log = ErrorLog(
                     raw_payload=raw_payload_str,
@@ -154,6 +165,11 @@ def run_etl(csv_path: str = CSV_FILE) -> dict:
                 )
                 db.add(error_log)
             else:
+                raw_tx_id = row.get("transaction_id")
+                raw_acc_num = row.get("account_number")
+                raw_currency = row.get("currency")
+                raw_merchant = row.get("merchant")
+
                 tx_id_str = str(raw_tx_id).strip()
                 currency_str = str(raw_currency).strip() if not is_empty_or_null(raw_currency) else "USD"
                 merchant_str = str(raw_merchant).strip()

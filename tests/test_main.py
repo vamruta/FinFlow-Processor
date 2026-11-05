@@ -1,6 +1,199 @@
 from datetime import datetime
 from unittest.mock import patch
-from models import ErrorLog, Transaction
+import pytest
+
+from app.models.transaction import ErrorLog, Transaction
+from etl_pipeline import validate_transaction_row
+
+
+# ==============================================================================
+# 1. Health Endpoint Tests
+# ==============================================================================
+
+
+def test_health_endpoint_returns_200(client):
+    """Test that the /health endpoint returns a 200 OK status and expected payload."""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
+
+
+def test_api_v1_health_endpoint_returns_200(client):
+    """Test that the /api/v1/health endpoint also returns a 200 OK status."""
+    response = client.get("/api/v1/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "database" in data
+
+
+# ==============================================================================
+# 2. Direct Validation Logic Tests (Negative amounts, missing IDs, duplicates)
+# ==============================================================================
+
+
+def test_validation_catches_negative_amount():
+    """Test validation logic directly to ensure negative amounts are caught as errors."""
+    row = {
+        "transaction_id": "TXN-VALID-001",
+        "account_number": "ACC-123456",
+        "amount": -50.25,
+        "currency": "USD",
+        "merchant": "Amazon",
+        "timestamp": "2026-11-05T12:00:00",
+    }
+    is_valid, error_reason, amount, timestamp = validate_transaction_row(row)
+    assert is_valid is False
+    assert error_reason is not None
+    assert "greater than 0" in error_reason
+    assert "-50.25" in error_reason
+
+
+def test_validation_catches_zero_amount():
+    """Test validation logic directly to ensure zero amounts are caught as errors."""
+    row = {
+        "transaction_id": "TXN-VALID-002",
+        "account_number": "ACC-123456",
+        "amount": 0.0,
+        "currency": "USD",
+        "merchant": "Target",
+        "timestamp": "2026-11-05T12:00:00",
+    }
+    is_valid, error_reason, _, _ = validate_transaction_row(row)
+    assert is_valid is False
+    assert error_reason is not None
+    assert "greater than 0" in error_reason
+
+
+def test_validation_catches_missing_transaction_id():
+    """Test validation logic directly to ensure missing or null IDs are caught as errors."""
+    # Test empty string
+    row_empty = {
+        "transaction_id": "",
+        "account_number": "ACC-123456",
+        "amount": 100.0,
+        "currency": "USD",
+        "merchant": "Amazon",
+        "timestamp": "2026-11-05T12:00:00",
+    }
+    is_valid, error_reason, _, _ = validate_transaction_row(row_empty)
+    assert is_valid is False
+    assert "transaction_id" in error_reason
+
+    # Test None
+    row_none = {
+        "transaction_id": None,
+        "account_number": "ACC-123456",
+        "amount": 100.0,
+        "currency": "USD",
+        "merchant": "Amazon",
+        "timestamp": "2026-11-05T12:00:00",
+    }
+    is_valid, error_reason, _, _ = validate_transaction_row(row_none)
+    assert is_valid is False
+    assert "transaction_id" in error_reason
+
+    # Test "nan"
+    row_nan = {
+        "transaction_id": "nan",
+        "account_number": "ACC-123456",
+        "amount": 100.0,
+        "currency": "USD",
+        "merchant": "Amazon",
+        "timestamp": "2026-11-05T12:00:00",
+    }
+    is_valid, error_reason, _, _ = validate_transaction_row(row_nan)
+    assert is_valid is False
+    assert "transaction_id" in error_reason
+
+
+def test_validation_catches_missing_mandatory_fields():
+    """Test validation logic directly for other mandatory fields (account_number, timestamp, merchant)."""
+    # Missing account_number
+    row_missing_acc = {
+        "transaction_id": "TXN-VALID-003",
+        "account_number": "",
+        "amount": 100.0,
+        "currency": "USD",
+        "merchant": "Amazon",
+        "timestamp": "2026-11-05T12:00:00",
+    }
+    is_valid, error_reason, _, _ = validate_transaction_row(row_missing_acc)
+    assert is_valid is False
+    assert "account_number" in error_reason
+
+    # Missing timestamp
+    row_missing_time = {
+        "transaction_id": "TXN-VALID-004",
+        "account_number": "ACC-123456",
+        "amount": 100.0,
+        "currency": "USD",
+        "merchant": "Amazon",
+        "timestamp": "",
+    }
+    is_valid, error_reason, _, _ = validate_transaction_row(row_missing_time)
+    assert is_valid is False
+    assert "timestamp" in error_reason
+
+    # Missing merchant
+    row_missing_merchant = {
+        "transaction_id": "TXN-VALID-005",
+        "account_number": "ACC-123456",
+        "amount": 100.0,
+        "currency": "USD",
+        "merchant": "",
+        "timestamp": "2026-11-05T12:00:00",
+    }
+    is_valid, error_reason, _, _ = validate_transaction_row(row_missing_merchant)
+    assert is_valid is False
+    assert "merchant" in error_reason
+
+
+def test_validation_catches_duplicate_transaction_id():
+    """Test validation logic catches duplicates within batch and existing DB records."""
+    row = {
+        "transaction_id": "TXN-DUP-001",
+        "account_number": "ACC-123456",
+        "amount": 100.0,
+        "currency": "USD",
+        "merchant": "Amazon",
+        "timestamp": "2026-11-05T12:00:00",
+    }
+    # Duplicate in batch
+    is_valid_batch, err_batch, _, _ = validate_transaction_row(
+        row, seen_batch_ids={"TXN-DUP-001"}
+    )
+    assert is_valid_batch is False
+    assert "batch" in err_batch
+
+    # Duplicate in database
+    is_valid_db, err_db, _, _ = validate_transaction_row(
+        row, existing_db_ids={"TXN-DUP-001"}
+    )
+    assert is_valid_db is False
+    assert "already exists in PostgreSQL" in err_db
+
+
+def test_validation_accepts_clean_row():
+    """Test validation logic accepts a valid transaction row."""
+    row = {
+        "transaction_id": "TXN-CLEAN-999",
+        "account_number": "ACC-998877",
+        "amount": "250.75",
+        "currency": "USD",
+        "merchant": "Starbucks",
+        "timestamp": "2026-11-05T08:30:00",
+    }
+    is_valid, error_reason, amount, timestamp = validate_transaction_row(row)
+    assert is_valid is True
+    assert error_reason is None
+    assert amount == 250.75
+    assert isinstance(timestamp, datetime)
+
+
+# ==============================================================================
+# 3. Model & Schema Instantiation Tests
+# ==============================================================================
 
 
 def test_models_direct_instantiation(db_session):
@@ -42,6 +235,11 @@ def test_models_direct_instantiation(db_session):
     assert "Invalid transaction format" in repr(err)
 
 
+# ==============================================================================
+# 4. API Endpoint Integration Tests
+# ==============================================================================
+
+
 def test_root_endpoint(client):
     """Test root endpoint returns service metadata."""
     response = client.get("/")
@@ -51,16 +249,8 @@ def test_root_endpoint(client):
     assert data["status"] == "online"
 
 
-def test_root_health_endpoint(client):
-    """Test GET /health returns {'status': 'healthy'}."""
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
-
-
 def test_get_transactions_pagination_and_filters(client):
     """Test GET /transactions with pagination and status/merchant filters."""
-    # Seed test transactions
     tx_list = [
         {
             "transaction_id": "TXN-PAG-001",
