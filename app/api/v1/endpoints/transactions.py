@@ -54,10 +54,41 @@ def create_transaction(
 def list_transactions(
     skip: int = 0,
     limit: int = 100,
+    status: str = None,
+    merchant: str = None,
     db: Session = Depends(get_db),
 ):
-    """Retrieve financial transactions with pagination."""
-    return db.query(Transaction).offset(skip).limit(limit).all()
+    """Retrieve financial transactions with pagination and optional status/merchant filters."""
+    query = db.query(Transaction)
+    if status:
+        query = query.filter(Transaction.status.ilike(status.strip()))
+    if merchant:
+        query = query.filter(Transaction.merchant.ilike(merchant.strip()))
+    return query.order_by(Transaction.id.asc()).offset(skip).limit(limit).all()
+
+
+@router.post(
+    "/transactions/run-etl",
+    status_code=status.HTTP_200_OK,
+    tags=["ETL"],
+)
+def run_etl_endpoint():
+    """Trigger the ETL pipeline to ingest raw transactions."""
+    from etl_pipeline import run_etl
+
+    result = run_etl()
+    if result.get("status") == "error":
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get("message", "ETL pipeline execution failed"),
+        )
+    return {
+        "status": "success",
+        "message": "ETL pipeline executed successfully",
+        "total_processed": result.get("total_processed", 0),
+        "total_successful": result.get("total_successful", 0),
+        "total_failed": result.get("total_failed", 0),
+    }
 
 
 @router.get(

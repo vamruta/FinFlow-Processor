@@ -40,8 +40,8 @@ def is_empty_or_null(val) -> bool:
     return s == "" or s.lower() == "nan"
 
 
-def run_etl():
-    print(f"[INFO] Starting ETL Pipeline, extracting from '{CSV_FILE}'...")
+def run_etl(csv_path: str = CSV_FILE) -> dict:
+    print(f"[INFO] Starting ETL Pipeline, extracting from '{csv_path}'...")
 
     # Ensure tables exist in the target database
     try:
@@ -51,15 +51,29 @@ def run_etl():
 
     # --- Phase 1: Extract ---
     try:
-        df = pd.read_csv(CSV_FILE)
+        df = pd.read_csv(csv_path)
     except FileNotFoundError:
-        print(f"[ERROR] Could not find '{CSV_FILE}'. Please run generate_mock_data.py first.")
-        return
+        msg = f"Could not find '{csv_path}'. Please run generate_mock_data.py first."
+        print(f"[ERROR] {msg}")
+        return {
+            "status": "error",
+            "message": msg,
+            "total_processed": 0,
+            "total_successful": 0,
+            "total_failed": 0,
+        }
     except Exception as exc:
-        print(f"[ERROR] Error reading '{CSV_FILE}': {exc}")
-        return
+        msg = f"Error reading '{csv_path}': {exc}"
+        print(f"[ERROR] {msg}")
+        return {
+            "status": "error",
+            "message": msg,
+            "total_processed": 0,
+            "total_successful": 0,
+            "total_failed": 0,
+        }
 
-    print(f"[INFO] Successfully extracted {len(df)} rows from '{CSV_FILE}'.")
+    print(f"[INFO] Successfully extracted {len(df)} rows from '{csv_path}'.")
 
     db = SessionLocal()
 
@@ -170,12 +184,33 @@ def run_etl():
         print(f"Total Failed    : {total_failed}")
         print("=" * 45)
 
+        return {
+            "status": "success",
+            "total_processed": total_processed,
+            "total_successful": total_successful,
+            "total_failed": total_failed,
+        }
+
     except SQLAlchemyError as db_err:
         db.rollback()
         print(f"[ERROR] Database error during ETL execution: {db_err}")
+        return {
+            "status": "error",
+            "message": str(db_err),
+            "total_processed": total_processed,
+            "total_successful": total_successful,
+            "total_failed": total_failed,
+        }
     except Exception as exc:
         db.rollback()
         print(f"[ERROR] Unexpected error during ETL execution: {exc}")
+        return {
+            "status": "error",
+            "message": str(exc),
+            "total_processed": total_processed,
+            "total_successful": total_successful,
+            "total_failed": total_failed,
+        }
     finally:
         db.close()
 

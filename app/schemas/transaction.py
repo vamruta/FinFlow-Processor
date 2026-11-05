@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Dict, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TransactionBase(BaseModel):
@@ -26,9 +26,7 @@ class TransactionCreate(TransactionBase):
 class TransactionRead(TransactionBase):
     id: int
     timestamp: datetime
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TransactionSummary(BaseModel):
@@ -51,6 +49,4 @@ class ErrorLogCreate(ErrorLogBase):
 class ErrorLogRead(ErrorLogBase):
     id: int
     logged_at: datetime
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
