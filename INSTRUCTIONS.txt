@@ -1,0 +1,144 @@
+# FinFlow Processor – Quick Start & Usage Guide
+
+This document walks you through **setting up**, **running**, and **testing** the FinFlow Processor project.
+
+---
+
+## 1️⃣ Prerequisites
+
+| Requirement | Why it matters |
+|-------------|----------------|
+| **Docker Desktop** (or Docker Engine) | Runs the PostgreSQL database and the FastAPI container. |
+| **Python 3.11+** | Required for the local virtual‑environment tooling and the mock‑data script. |
+| **Git** (optional) | If you clone the repo rather than work directly on the Desktop folder. |
+
+> **Tip** – All commands below assume you are in the project root:
+> `FinFlow Processor`
+
+---
+
+## 2️⃣ Create a Virtual Environment (optional, for local dev)
+
+```powershell
+# From the project root
+python -m venv .venv
+.\.venv\Scripts\activate   # PowerShell
+# If you use CMD, run `.venv\Scripts\activate.bat`
+
+# Install Python dependencies
+pip install -r requirements.txt
+```
+
+You can now run the FastAPI app directly with:
+
+```powershell
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+---
+
+## 3️⃣ Build & Run with Docker Compose
+
+### Start the stack
+```powershell
+docker compose up --build -d   # `-d` runs containers in the background
+```
+- The **PostgreSQL** service will be available at `localhost:5432`.
+- The **FastAPI** service will listen on `localhost:8000`.
+
+### Verify containers are running
+```powershell
+docker ps   # shows the two containers (finflow-db and finflow-processor-app)
+```
+You should see something like:
+```
+CONTAINER ID   IMAGE               COMMAND                  ...   PORTS                    NAMES
+abcd1234       finflow-processor   "uvicorn app.main:app …"   ...   0.0.0.0:8000->8000/tcp   finflow-processor-app
+efgh5678       postgres:16-alpine  "docker-entrypoint.s…"    ...   0.0.0.0:5432->5432/tcp   finflow-db
+```
+
+### Access the API documentation
+- **Swagger UI** – <http://localhost:8000/docs>
+- **ReDoc** – <http://localhost:8000/redoc>
+
+Both expose the `/api/v1/` endpoints (health, transactions, errors, etc.).
+
+---
+
+## 4️⃣ Stop & Clean Up
+
+```powershell
+# Stop containers but keep volumes (data persists)
+docker compose down
+
+# Remove everything including the persistent PostgreSQL volume
+# Useful when you want a fresh DB
+docker compose down -v   # `-v` removes named volumes like postgres_data
+```
+
+---
+
+## 5️⃣ Generate Mock Transaction Data
+
+The repository now includes a helper script: **`generate_mock_data.py`**.
+
+```powershell
+python generate_mock_data.py
+```
+- Produces `raw_transactions.csv` in the project root.
+- Contains **500 rows** of synthetic financial data plus **5 deliberately dirty rows** (missing amount, negative amount, duplicate IDs, missing merchant, fully empty line).
+- Use this CSV to test ingestion pipelines, error‑logging (`ErrorLog`), and any bulk‑import logic you add later.
+
+---
+
+## 6️⃣ Running the Test Suite
+
+> **Note:** The tests use an in‑memory SQLite DB, so they run completely offline.
+
+```powershell
+pytest -v
+```
+You should see all tests pass, including the new ones that verify the `Transaction` and `ErrorLog` models.
+
+If you get `ModuleNotFoundError: No module named 'pytest'`, install it first:
+```powershell
+pip install pytest
+```
+
+---
+
+## 7️⃣ Monitoring Docker Logs
+
+```powershell
+# Follow the FastAPI container logs (press Ctrl+C to stop)
+docker logs -f finflow-processor-app
+
+# Follow the PostgreSQL container logs
+docker logs -f finflow-db
+```
+These live streams are handy for spotting startup errors or DB connection problems.
+
+---
+
+## 8️⃣ Frequently Asked Questions
+
+- **Q: I changed the `.env.example` file – do I need to rename it?**
+  - A: Yes. Copy it to `.env` (`cp .env.example .env`). Docker Compose reads the `.env` file automatically.
+- **Q: How do I reset the PostgreSQL database?**
+  - A: Stop the stack (`docker compose down -v`) then start it again. The volume will be recreated fresh.
+- **Q: My FastAPI container keeps restarting.**
+  - A: Check the logs (`docker logs finflow-processor-app`) for missing dependencies or environment‑variable typos.
+- **Q: Where are the generated CSV files stored?**
+  - A: In the project root next to `docker-compose.yml`.
+
+---
+
+## 9️⃣ Next Steps (optional)
+
+- Implement a **CSV ingestion endpoint** that reads `raw_transactions.csv`, validates each row, stores good rows in the `transactions` table, and writes broken rows to the `error_logs` table using the `ErrorLog` model.
+- Add **Docker health‑checks** for the FastAPI container (e.g., `curl http://localhost:8000/health`).
+- Extend the **Swagger UI** with an example file‑upload operation.
+
+---
+
+*Happy coding! 🚀*
