@@ -3,8 +3,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.transaction import Transaction
+from models import ErrorLog, Transaction
 from app.schemas.transaction import (
+    ErrorLogCreate,
+    ErrorLogRead,
     TransactionCreate,
     TransactionRead,
     TransactionSummary,
@@ -27,16 +29,17 @@ def create_transaction(
     """Record a new financial transaction."""
     existing = (
         db.query(Transaction)
-        .filter(Transaction.reference_id == payload.reference_id)
+        .filter(Transaction.transaction_id == payload.transaction_id)
         .first()
     )
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Transaction with reference {payload.reference_id} already exists.",
+            detail=f"Transaction with ID {payload.transaction_id} already exists.",
         )
 
-    transaction = Transaction(**payload.model_dump())
+    data = payload.model_dump(exclude_unset=True)
+    transaction = Transaction(**data)
     db.add(transaction)
     db.commit()
     db.refresh(transaction)
@@ -70,10 +73,43 @@ def get_transactions_summary(
     records = [
         {
             "amount": t.amount,
-            "category": t.category,
+            "merchant": t.merchant,
             "currency": t.currency,
             "status": t.status,
         }
         for t in transactions
     ]
     return FinancialProcessorService.calculate_summary(records)
+
+
+@router.post(
+    "/errors",
+    response_model=ErrorLogRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Error Logs"],
+)
+def log_error(
+    payload: ErrorLogCreate,
+    db: Session = Depends(get_db),
+):
+    """Record an invalid payload and processing error message."""
+    data = payload.model_dump(exclude_unset=True)
+    error_entry = ErrorLog(**data)
+    db.add(error_entry)
+    db.commit()
+    db.refresh(error_entry)
+    return error_entry
+
+
+@router.get(
+    "/errors",
+    response_model=List[ErrorLogRead],
+    tags=["Error Logs"],
+)
+def list_errors(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    """Retrieve logged errors with pagination."""
+    return db.query(ErrorLog).offset(skip).limit(limit).all()

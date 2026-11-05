@@ -1,6 +1,9 @@
 """Pydantic data schemas."""
 from app.schemas.health import HealthResponse
 from app.schemas.transaction import (
+    ErrorLogBase,
+    ErrorLogCreate,
+    ErrorLogRead,
     TransactionBase,
     TransactionCreate,
     TransactionRead,
@@ -13,4 +16,7 @@ __all__ = [
     "TransactionCreate",
     "TransactionRead",
     "TransactionSummary",
+    "ErrorLogBase",
+    "ErrorLogCreate",
+    "ErrorLogRead",
 ]

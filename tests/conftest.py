@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
+import models  # Ensures Transaction and ErrorLog models are registered with Base.metadata
 
 # Use in-memory SQLite for isolated testing
 TEST_DATABASE_URL = "sqlite:///:memory:"

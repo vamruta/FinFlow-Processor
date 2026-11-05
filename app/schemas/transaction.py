@@ -4,12 +4,19 @@ from pydantic import BaseModel, Field
 
 
 class TransactionBase(BaseModel):
-    reference_id: str = Field(..., description="Unique transaction reference ID")
-    account_id: str = Field(..., description="Account identifier")
-    amount: float = Field(..., description="Monetary amount of transaction")
-    currency: str = Field(default="USD", max_length=3, description="ISO currency code")
-    category: str = Field(..., description="Category (e.g. transfer, deposit, expense)")
-    status: str = Field(default="PENDING", description="Transaction status")
+    transaction_id: str = Field(
+        ..., description="Unique transaction ID (e.g. TXN100234)"
+    )
+    account_number: str = Field(..., description="Account number")
+    amount: float = Field(..., description="Monetary transaction amount")
+    currency: str = Field(default="USD", description="Currency code, defaults to USD")
+    merchant: str = Field(..., description="Merchant name")
+    status: str = Field(
+        default="SUCCESS", description="Transaction status: SUCCESS or FAILED"
+    )
+    timestamp: Optional[datetime] = Field(
+        default=None, description="Transaction timestamp"
+    )
 
 
 class TransactionCreate(TransactionBase):
@@ -18,8 +25,7 @@ class TransactionCreate(TransactionBase):
 
 class TransactionRead(TransactionBase):
     id: int
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    timestamp: datetime
 
     class Config:
         from_attributes = True
@@ -29,4 +35,22 @@ class TransactionSummary(BaseModel):
     total_volume: float
     transaction_count: int
     average_amount: float
-    by_category: Dict[str, float]
+    by_merchant: Dict[str, float]
+
+
+class ErrorLogBase(BaseModel):
+    raw_payload: str = Field(..., description="Stores the raw bad data line")
+    error_message: str = Field(..., description="Why processing failed")
+    logged_at: Optional[datetime] = Field(default=None, description="Log timestamp")
+
+
+class ErrorLogCreate(ErrorLogBase):
+    pass
+
+
+class ErrorLogRead(ErrorLogBase):
+    id: int
+    logged_at: datetime
+
+    class Config:
+        from_attributes = True
