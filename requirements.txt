@@ -6,3 +6,4 @@ pydantic
 pandas
 pytest
 requests
+httpx

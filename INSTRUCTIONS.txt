@@ -78,16 +78,40 @@ docker compose down -v   # `-v` removes named volumes like postgres_data
 
 ---
 
-## 5️⃣ Generate Mock Transaction Data
+## 5️⃣ Generate Mock Transaction Data & Run ETL Pipeline
 
-The repository now includes a helper script: **`generate_mock_data.py`**.
+### Step 1: Generate Mock Data
+The repository includes a helper script: **`generate_mock_data.py`**.
 
 ```powershell
 python generate_mock_data.py
 ```
 - Produces `raw_transactions.csv` in the project root.
 - Contains **500 rows** of synthetic financial data plus **5 deliberately dirty rows** (missing amount, negative amount, duplicate IDs, missing merchant, fully empty line).
-- Use this CSV to test ingestion pipelines, error‑logging (`ErrorLog`), and any bulk‑import logic you add later.
+
+### Step 2: Run the ETL Pipeline
+The **`etl_pipeline.py`** script extracts the CSV, validates data, inserts valid records into PostgreSQL, and logs corrupt rows to `error_logs`:
+
+```powershell
+# Run locally (if local Python has psycopg2-binary installed)
+python etl_pipeline.py
+
+# OR run directly inside the Docker container
+docker exec finflow-processor-app python etl_pipeline.py
+```
+
+Expected output:
+```text
+[INFO] Starting ETL Pipeline, extracting from 'raw_transactions.csv'...
+[INFO] Successfully extracted 500 rows from 'raw_transactions.csv'.
+=============================================
+ETL PIPELINE EXECUTION SUMMARY
+=============================================
+Total Processed : 500
+Total Successful: 495
+Total Failed    : 5
+=============================================
+```
 
 ---
 
